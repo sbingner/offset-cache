@@ -41,6 +41,28 @@ void set_offset(const char *name, uint64_t addr)
     TAILQ_INSERT_TAIL(&cache, entry, entries);
 }
 
+uint64_t get_offset(const char *name)
+{
+    offset_entry_t *np;
+    TAILQ_FOREACH(np, &cache, entries) {
+        if (strcmp(name, np->name) == 0) {
+            return np->addr;
+        }
+    }
+    return 0;
+}
+
+bool has_offset(const char *name)
+{
+    offset_entry_t *np;
+    TAILQ_FOREACH(np, &cache, entries) {
+        if (strcmp(name, np->name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 #define ENTRY_SIZE(x) (sizeof(offset_entry_t) + strlen((x)->name) + 1)
 size_t get_cache_blob_size()
 {
@@ -113,28 +135,49 @@ void blob_rebase(struct cache_blob *blob, uint64_t old_base, uint64_t new_base)
     }
 }
 
-void import_cache_blob(struct cache_blob *blob)
+static void rebase_if_needed(struct cache_blob *blob)
 {
-    struct cache_blob *local_blob = blob;
     struct offset_cache *local_cache = &blob->cache;
 
     if ((local_cache->tqh_first && (uint64_t)local_cache->tqh_first != (uint64_t)blob + sizeof(struct cache_blob)) ||
-            (!local_cache->tqh_first && local_cache->tqh_last != &local_cache->tqh_first)) {
+        (!local_cache->tqh_first && local_cache->tqh_last != &local_cache->tqh_first)) {
         uint64_t old_base = (uint64_t)local_cache->tqh_first - sizeof(struct cache_blob);
-        local_blob = malloc(blob->size);
-        memcpy(local_blob, blob, blob->size);
-        local_cache = &local_blob->cache;
-        blob_rebase(local_blob, old_base, (uint64_t)local_blob);
+        blob_rebase(blob, old_base, (uint64_t)blob);
     }
+}
+
+int merge_cache_blob(struct cache_blob *blob)
+{
+    struct cache_blob *local_blob = malloc(blob->size);
+    memcpy(local_blob, blob, blob->size);
+    rebase_if_needed(local_blob);
+
+    struct offset_cache *local_cache = &local_blob->cache;
+    
+    offset_entry_t *np;
+    TAILQ_FOREACH(np, &cache, entries) {
+        remove_offset(np->name);
+    }
+
+    int merged_count = 0;
+    TAILQ_FOREACH(np, local_cache, entries) {
+        set_offset(np->name, np->addr);
+        merged_count++;
+    }
+    free(local_blob);
+    return merged_count;
+}
+
+void import_cache_blob(struct cache_blob *blob)
+{
+    offset_entry_t *np;
+
+    rebase_if_needed(blob);
+    struct offset_cache *local_cache = &blob->cache;
+
     destroy_cache();
-    offset_entry_t *np, *np_t, *entry;
-    TAILQ_FOREACH_SAFE(np, local_cache, entries, np_t) {
-        entry = malloc(ENTRY_SIZE(np));
-        memcpy(entry, np, ENTRY_SIZE(np));
-        TAILQ_INSERT_TAIL(&cache, entry, entries);
-    }
-    if (local_blob != blob) {
-        free(local_blob);
+    TAILQ_FOREACH(np, local_cache, entries) {
+        set_offset(np->name, np->addr);
     }
 }
 
@@ -150,17 +193,6 @@ void destroy_cache()
         free(np);
     }
     init_cache();
-}
-
-uint64_t get_offset(const char *name)
-{
-    offset_entry_t *np;
-    TAILQ_FOREACH(np, &cache, entries) {
-        if (strcmp(name, np->name) == 0) {
-            return np->addr;
-        }
-    }
-    return 0;
 }
 
 bool compare_cache_blob(struct cache_blob *blob)
