@@ -33,7 +33,6 @@ bool remove_offset(const char *name)
 
 void set_offset(const char *name, uint64_t addr)
 {
-    offset_entry_t *np, *np_t;
     offset_entry_t *entry = malloc(sizeof(offset_entry_t) + strlen(name) + 1);
     entry->addr = addr;
     strcpy(entry->name, name);
@@ -85,7 +84,6 @@ size_t export_cache_blob(struct cache_blob **newblob)
     size_t blob_size = get_cache_blob_size();
     blob_size += sizeof(struct cache_blob) - sizeof(struct offset_cache);
 
-    if (*newblob != NULL) free(*newblob);
     *newblob = create_cache_blob(blob_size);
     if (copy_cache_blob(*newblob) != blob_size) {
         fprintf(stderr, "Error: unable to copy blob - dest buffer too small?\n");
@@ -107,7 +105,6 @@ void blob_rebase(struct cache_blob *blob, uint64_t old_base, uint64_t new_base)
     if (local_cache->tqh_first == NULL) return;
 
     REBASE(local_cache->tqh_first, old_base, new_base);
-    offset_entry_t *entry = (offset_entry_t *)(local_cache + 1);
     for (offset_entry_t *entry = (offset_entry_t *)(local_cache + 1);;
             entry = (offset_entry_t *)((char *)entry + ENTRY_SIZE(entry))) {
         REBASE(entry->entries.tqe_prev, old_base, new_base);
@@ -116,7 +113,7 @@ void blob_rebase(struct cache_blob *blob, uint64_t old_base, uint64_t new_base)
     }
 }
 
-void import_cache(struct cache_blob *blob)
+void import_cache_blob(struct cache_blob *blob)
 {
     struct cache_blob *local_blob = blob;
     struct offset_cache *local_cache = &blob->cache;
@@ -155,7 +152,8 @@ void destroy_cache()
     init_cache();
 }
 
-uint64_t get_offset(const char *name) {
+uint64_t get_offset(const char *name)
+{
     offset_entry_t *np;
     TAILQ_FOREACH(np, &cache, entries) {
         if (strcmp(name, np->name) == 0) {
@@ -165,11 +163,38 @@ uint64_t get_offset(const char *name) {
     return 0;
 }
 
+bool compare_cache_blob(struct cache_blob *blob)
+{
+    offset_entry_t *np;
+    offset_entry_t *entry = TAILQ_FIRST(&blob->cache);
+    TAILQ_FOREACH(np, &cache, entries) {
+        // We ran out of blob entries before cache entries
+        if (!entry) return false;
+        // It isn't equal
+        if (strcmp(entry->name, np->name)) return false;
+        if (entry->addr != np->addr) return false;
+        entry = TAILQ_NEXT(entry, entries);
+    }
+    // everything matched but there are more entries
+    if (entry) return false;
+    return true;
+}
+
+void print_cache()
+{
+    offset_entry_t *np;
+    TAILQ_FOREACH(np, &cache, entries) {
+        printf("Entry %p\n"
+               "\taddr: 0x%llx\n"
+               "\tname: %s\n",
+               np, np->addr, np->name);
+    }
+}
+
 #ifdef MAIN
 // Example / test code
 int main()
 {
-    init_cache();
     set_offset("kernel_base", 0xdeadbeefdead0000);
     set_offset("kernel_slide", 0x50);
     set_offset("kernel_slide", 0x69);
@@ -203,7 +228,7 @@ int main()
     offset_entry_t *testentry = blob->entries;
     testentry = (offset_entry_t*)((char *)testentry + sizeof(offset_entry_t) + strlen(testentry->name) + 1);
     printf("Importing \"kernel\" blob\n");
-    import_cache(blob);
+    import_cache_blob(blob);
 
     printf("get_offset(kernel_base): %llx\n", get_offset("kernel_base"));
     TAILQ_FOREACH(np, &cache, entries) {

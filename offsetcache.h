@@ -34,12 +34,17 @@ struct cache_blob {
 void init_cache(void);
 void destroy_cache(void);
 void import_cache_blob(struct cache_blob *blob);
+size_t export_cache_blob(struct cache_blob **newblob);
+bool compare_cache_blob(struct cache_blob *blob);
+
 bool remove_offset(const char *name);
 void set_offset(const char *name, uint64_t addr);
+uint64_t get_offset(const char *name);
 size_t get_cache_blob_size(void);
 struct cache_blob *create_cache_blob(size_t size);
-size_t export_cache_blob(struct cache_blob **newblob);
 size_t copy_cache_blob(struct cache_blob *blob);
 void blob_rebase(struct cache_blob *blob, uint64_t old_base, uint64_t new_base);
+
+void print_cache(void);
 
 #endif
